@@ -48,7 +48,17 @@ export async function buildCity({ scene, renderer }) {
 
   const TT = [], tick = async (n, next) => { TT.push(n + ' ' + (performance.now() - t0).toFixed(0)); if (next) await boot?.stage(next); };
   await tick('tex', 'gen');
-  const blocks = buildBlocks();
+  let blocks = buildBlocks();
+  if (lite) {
+    // \~400 m around spawn (x\~250, z\~160) — full island OOMs phones
+    const SX = 250, SZ = 160, R2 = 400 * 400;
+    blocks = blocks.filter(b => {
+      const bx = (b.x0 + b.x1) * 0.5, bz = (b.z0 + b.z1) * 0.5;
+      const dx = bx - SX, dz = bz - SZ;
+      return dx * dx + dz * dz < R2;
+    });
+    console.log('[city] mobile lite blocks', blocks.length);
+  }
   // hero tower for the `wall` shot (ref 2) on the park-facing block east of the avenue at x=250
   const HERO_RECT = { x0: 266, z0: -620, x1: 300, z1: -580 };
   const gen = generateBuildings(blocks, 1234, {
@@ -105,11 +115,11 @@ export async function buildCity({ scene, renderer }) {
   await tick('ground');
   const far = lite ? { count: 0, near: 0, trees: 0, update() {} } : buildFarShore({ scene: root, facadeMat, solids: gen.solids });
   await tick('far');
-  const bridges = buildBridges({ scene: root, T, solids: gen.solids, zips: gen.zips, boxes: gen.boxes }); // foundation: East River bridges (bridges r1: + anchor boxes)
+  const bridges = lite ? { spans: [], update() {} } : buildBridges({ scene: root, T, solids: gen.solids, zips: gen.zips, boxes: gen.boxes });
   await tick('bridges');
   // foundation: distant hinterland out to the horizon + wet tidal bands along every seawall / bulkhead
   const hinter = lite ? { count: 0, update() {} } : buildHinterland({ scene: root });
-  buildWetBands({ scene: root, T, segs: [...(ground.wetSegs ?? []), ...(far.wetSegs ?? [])] });
+  if (!lite) buildWetBands({ scene: root, T, segs: [...(ground.wetSegs ?? []), ...(far.wetSegs ?? [])] });
   await tick('hinterland ' + hinter.count, 'props');
   const boats = lite ? { update() {} } : buildBoats({ scene: root, solids: gen.solids, // foundation: river traffic + wakes (+ round 12: moored boats at the piers)
     docks: [...PIERS, ...(far.piers ?? []).map(([x0, z0, x1, z1]) => ({ x0, z0, x1, z1 }))] });
