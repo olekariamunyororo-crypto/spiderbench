@@ -69,9 +69,13 @@ export async function buildCity({ scene, renderer }) {
   const heroRect = gen.excluded[0] ? { ...gen.excluded[0], x0: HERO_RECT.x0 } : HERO_RECT;
   const root = new THREE.Group(); root.name = 'city';
   scene.add(root);
-  buildStandalone({ scene: root, gen, T }); // citygeo: Grand Central, Times-Square screens (writes into the tile builders)
-  buildTimesSquare({ scene: root, gen }); // timessq: screens, plazas, TKTS steps, One-Times-Square tower (writes into the tile builders)
-  const rooftops = await buildRooftops({ scene: root, gen, facadeMat, T, renderer, extraRoofs: [{ rect: heroRect, H: 96 }] }); // rooftops: roof skins, penthouses, clutter (writes into the tile builders)
+  if (!lite) {
+    buildStandalone({ scene: root, gen, T });
+    buildTimesSquare({ scene: root, gen });
+  }
+  const rooftops = lite
+    ? { roofTrees: [], update() {} }
+    : await buildRooftops({ scene: root, gen, facadeMat, T, renderer, extraRoofs: [{ rect: heroRect, H: 96 }] });
   const signage = lite ? { update() {} } : buildSignage({ scene: root, gen });
   const tileMeshes = [];
   // (perf) the far-LOD tiles are grouped into 2x2 super-tiles (tilebatch.js): one draw per super-tile while all its
@@ -97,14 +101,14 @@ export async function buildCity({ scene, renderer }) {
   const hero = buildHero({ scene: root, rect: heroRect, facadeMat, renderer, solids: gen.solids, zips: gen.zips });
   gen.boxes.push(hero.box); gen.footprints.push(hero.footprint);
   const ground = buildGround({ scene: root, T, blocks, facadeMat, solids: gen.solids, zips: gen.zips, renderer });
-  buildPark({ scene: root, facadeMat, solids: gen.solids, zips: gen.zips, meadowDist, parkPaths: ground.parkPaths }); // park agent: Met-like museum + schist outcrops
+  if (!lite) buildPark({ scene: root, facadeMat, solids: gen.solids, zips: gen.zips, meadowDist, parkPaths: ground.parkPaths });
   await tick('ground');
   const far = lite ? { count: 0, near: 0, trees: 0, update() {} } : buildFarShore({ scene: root, facadeMat, solids: gen.solids });
   await tick('far');
   const bridges = buildBridges({ scene: root, T, solids: gen.solids, zips: gen.zips, boxes: gen.boxes }); // foundation: East River bridges (bridges r1: + anchor boxes)
   await tick('bridges');
   // foundation: distant hinterland out to the horizon + wet tidal bands along every seawall / bulkhead
-  const hinter = lite ? { update() {} } : buildHinterland({ scene: root });
+  const hinter = lite ? { count: 0, update() {} } : buildHinterland({ scene: root });
   buildWetBands({ scene: root, T, segs: [...(ground.wetSegs ?? []), ...(far.wetSegs ?? [])] });
   await tick('hinterland ' + hinter.count, 'props');
   const boats = lite ? { update() {} } : buildBoats({ scene: root, solids: gen.solids, // foundation: river traffic + wakes (+ round 12: moored boats at the piers)
@@ -113,7 +117,7 @@ export async function buildCity({ scene, renderer }) {
   const highways = lite ? { update() {} } : buildHighways({ scene: root, T, solids: gen.solids, models: vehModels });
   // (citylife bridges) bridge cars are ordinary street traffic now (collidable, junction rules, same models): no bridgeTraffic
   const nSolidsPre = gen.solids.count; // citygeo: props' solids start here (refit below)
-  const props = await buildProps({ scene: root, blocks, parkPaths: ground.parkPaths, T, solids: gen.solids, buildings: gen.buildings }); // citylife
+  const props = lite ? { treeSpots: [], phase: 0, pools: [], update() {} } : await buildProps({ scene: root, blocks, parkPaths: ground.parkPaths, T, solids: gen.solids, buildings: gen.buildings });
   await tick('props', 'life');
   { // (bridges r3) bridge ramp mouths: no street furniture / trees on the apron, the ramp foot or the joined street's
     // sidewalks and parking lanes at the T (lamps, signal masts / posts stay). Parked cars: npc/roads.js bridgeJunctions.
