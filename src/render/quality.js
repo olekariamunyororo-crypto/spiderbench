@@ -1,5 +1,17 @@
-// OWNER: render agent. Quality presets selected with ?q=low|med|high (default high).
+// OWNER: render agent. Quality presets selected with ?q=low|med|high|mobile (default high on desktop, mobile on touch/coarse).
 const PRESETS = {
+  // Leaner than low: phones / tablets. Minimal shadows, no post extras.
+  mobile: {
+    name: 'mobile',
+    cascades: 1, shadowMapSize: 512, shadowFar: 200, splits: [0.1, 200], shadowTaps: 3,
+    ao: false, aoHalfRes: true, aoQuality: 'Performance',
+    cloudSteps: 6, cloudLightSteps: 1, envSize: 32,
+    taa: false, bloomLevels: 3, dofTaps: 0, mbSamples: 0, sharpen: 0.15,
+    charShadow: 0, ssr: false, shafts: false, shaftSteps: 0,
+    ssgi: false, wet: false,
+    pixelRatio: 1.0, // hard cap; main.js also uses this
+    renderScale: 0.75, // internal buffer scale vs CSS pixels (pipeline setSize)
+  },
   low: {
     name: 'low',
     cascades: 2, shadowMapSize: 1024, shadowFar: 500, splits: [0.1, 30, 500], shadowTaps: 5,
@@ -8,6 +20,8 @@ const PRESETS = {
     taa: true, bloomLevels: 5, dofTaps: 16, mbSamples: 6, sharpen: 0.25,
     charShadow: 0, ssr: false, shafts: false, shaftSteps: 0,
     ssgi: false, wet: false, // (lighting2 r1)
+    pixelRatio: 1.25,
+    renderScale: 1.0,
   },
   med: {
     name: 'med',
@@ -17,6 +31,8 @@ const PRESETS = {
     taa: true, bloomLevels: 6, dofTaps: 22, mbSamples: 8, sharpen: 0.3,
     charShadow: 1024, ssr: true, ssrSteps: 20, shafts: true, shaftSteps: 12,
     ssgi: true, ssgiDirs: 4, ssgiSteps: 4, wet: true, // (lighting2 r1)
+    pixelRatio: 1.5,
+    renderScale: 1.0,
   },
   high: {
     name: 'high',
@@ -27,19 +43,37 @@ const PRESETS = {
     taa: true, bloomLevels: 6, dofTaps: 43, mbSamples: 10, sharpen: 0.35,
     charShadow: 2048, ssr: true, ssrSteps: 28, shafts: true, shaftSteps: 16,
     ssgi: true, ssgiDirs: 6, ssgiSteps: 4, wet: true, // (lighting2 r1) SSGI + wet-patch roughness
+    pixelRatio: 1.5,
+    renderScale: 1.0,
   },
 };
+
+function isMobileLike() {
+  try {
+    if (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches) return true;
+    if ('ontouchstart' in window && Math.min(screen.width, screen.height) < 900) return true;
+    // Low-end heuristic: few cores + limited memory
+    if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4 &&
+        navigator.deviceMemory && navigator.deviceMemory <= 4) return true;
+  } catch (e) { /* non-browser */ }
+  return false;
+}
 
 let _q = null;
 export function getQuality() {
   if (_q) return _q;
   let name = 'high';
   try {
-    const p = new URLSearchParams(location.search).get('q');
+    const params = new URLSearchParams(location.search);
+    const p = params.get('q');
     if (p && PRESETS[p]) name = p;
-    if (p === 'medium') name = 'med';
+    else if (p === 'medium') name = 'med';
+    else if (!p && isMobileLike()) name = 'mobile'; // auto mobile preset when no explicit ?q=
   } catch (e) { /* non-browser */ }
   _q = { ...PRESETS[name] };
+  // defaults if an older preset object is missing new fields
+  if (_q.pixelRatio == null) _q.pixelRatio = 1.5;
+  if (_q.renderScale == null) _q.renderScale = 1.0;
   // (perf) ?perfoff disables the perf agent's culling / batching changes (A/B measurements with tools/perf_probe.mjs)
   try { _q.perf = !new URLSearchParams(location.search).has('perfoff'); } catch (e) { _q.perf = true; }
   // (perf r2) ?qset=ao:0,ssr:0,shadowMapSize:1024 overrides single preset fields (GPU ablation with tools/perf_probe.mjs)
@@ -48,4 +82,15 @@ export function getQuality() {
     if (qs) for (const kv of qs.split(',')) { const [k, v] = kv.split(':'); if (k in _q) _q[k] = v === 'true' ? true : v === 'false' ? false : isNaN(+v) ? v : +v; }
   } catch (e) { /* non-browser */ }
   return _q;
+}
+
+/** Pixel ratio for the WebGL canvas (CSS px → device buffer). */
+export function getPixelRatio() {
+  const q = getQuality();
+  const cap = q.pixelRatio ?? 1.5;
+  try {
+    return Math.min(devicePixelRatio || 1, cap);
+  } catch (e) {
+    return Math.min(1, cap);
+  }
 }
