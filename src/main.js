@@ -32,8 +32,8 @@ const dpr = getPixelRatio();
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false, reversedDepthBuffer: true });
 renderer.setPixelRatio(dpr);
 renderer.setSize(innerWidth, innerHeight);
-renderer.shadowMap.enabled = true;
-// Softer filtering is expensive; mobile/low uses basic PCF
+// Mobile: shadows off entirely (VRAM + cascade cost). Low: basic PCF.
+renderer.shadowMap.enabled = Q.shadows !== false;
 renderer.shadowMap.type = (Q.name === 'mobile' || Q.name === 'low') ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NoToneMapping; // tone mapping done in pipeline
@@ -85,7 +85,7 @@ window.__ctx = ctx;
 // post passes) before the first frame: they link in parallel on the driver's threads during the loading frame instead
 // of one by one later, each freezing the game for 0.2-6 s the first time its material came into view
 // (render/warmup.js). ?nowarm = old behaviour (A/B)
-const warmup = !shotName && !params.has('nowarm') ? createWarmup(renderer, scene, camera, { mirrorLayers: [REFL_LAYER, BIG_CASTER_LAYER] }) : null;
+const warmup = !shotName && !params.has('nowarm') && !Q.noWarmup ? createWarmup(renderer, scene, camera, { mirrorLayers: [REFL_LAYER, BIG_CASTER_LAYER] }) : null;
 // first the state the first frame would set that is part of the program keys: the sky IBL (scene.environment, from the
 // first lighting update) and the pipeline's NO_SSR material defines
 if (warmup) { lighting.update(camera); pipeline.prepareMaterials?.(); warmup.rescan(); warmup.flush(); await warmup.settle(k => boot.sub(k)); }
