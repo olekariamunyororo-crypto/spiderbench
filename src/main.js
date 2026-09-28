@@ -19,17 +19,22 @@ import { SHOTS } from './shots.js';
 import { createWarmup } from './render/warmup.js'; // (perf r3)
 import { REFL_LAYER } from './world/water.js';
 import { BIG_CASTER_LAYER } from './render/csm.js';
+import { getQuality, getPixelRatio } from './render/quality.js';
 
 const params = new URLSearchParams(location.search);
 const shotName = params.get('shot');
 // loading screen (index.html): stage labels + progress; it fades out once the first frames and the game systems are up
 const boot = window.__boot || { stage: async () => {}, sub() {}, done() {} };
 
+const Q = getQuality();
+const dpr = getPixelRatio();
+
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false, reversedDepthBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setPixelRatio(dpr);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Softer filtering is expensive; mobile/low uses basic PCF
+renderer.shadowMap.type = (Q.name === 'mobile' || Q.name === 'low') ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NoToneMapping; // tone mapping done in pipeline
 // (zfix) three r186 negates only polygonOffsetFactor for the reversed depth buffer, so every decal's negative
@@ -58,12 +63,22 @@ await boot.stage('shaders');
 const hud = createHud({ player, world, camera });
 const pipeline = createPipeline({ renderer, scene, camera, lighting });
 
-addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight); pipeline.setSize(innerWidth, innerHeight);
-});
+function applySize() {
+  const scale = Q.renderScale ?? 1;
+  const w = Math.max(1, Math.round(innerWidth * scale));
+  const h = Math.max(1, Math.round(innerHeight * scale));
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(getPixelRatio());
+  renderer.setSize(w, h, false);
+  renderer.domElement.style.width = '100%';
+  renderer.domElement.style.height = '100%';
+  pipeline.setSize(w, h);
+}
+applySize();
+addEventListener('resize', applySize);
 
-const ctx = { THREE, renderer, scene, camera, lighting, world, player, hud, pipeline, input };
+const ctx = { THREE, renderer, scene, camera, lighting, world, player, hud, pipeline, input, quality: Q };
 ctx.systems = ctx.systems || []; // C5: game systems (src/game/**) push {update(dt)} here
 window.__ctx = ctx;
 // (perf r3) queue every shader program the game can draw (main pass + the river mirror's unshadowed variant + the
