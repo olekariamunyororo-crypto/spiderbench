@@ -3,14 +3,17 @@ const PRESETS = {
   // Leaner than low: phones / tablets. Minimal shadows, no post extras.
   mobile: {
     name: 'mobile',
-    cascades: 1, shadowMapSize: 512, shadowFar: 200, splits: [0.1, 200], shadowTaps: 3,
+    // Survival preset for phones: prioritise not OOMing over fidelity.
+    cascades: 1, shadowMapSize: 256, shadowFar: 120, splits: [0.1, 120], shadowTaps: 1,
     ao: false, aoHalfRes: true, aoQuality: 'Performance',
-    cloudSteps: 6, cloudLightSteps: 1, envSize: 32,
-    taa: false, bloomLevels: 3, dofTaps: 0, mbSamples: 0, sharpen: 0.15,
+    cloudSteps: 4, cloudLightSteps: 1, envSize: 16,
+    taa: false, bloomLevels: 2, dofTaps: 0, mbSamples: 0, sharpen: 0.1,
     charShadow: 0, ssr: false, shafts: false, shaftSteps: 0,
     ssgi: false, wet: false,
-    pixelRatio: 1.0, // hard cap; main.js also uses this
-    renderScale: 0.75, // internal buffer scale vs CSS pixels (pipeline setSize)
+    pixelRatio: 1.0,
+    renderScale: 0.5,   // half-res internal buffers
+    shadows: false,     // main.js disables renderer.shadowMap
+    noWarmup: true,     // skip shader precompile (huge RAM spike on mobile)
   },
   low: {
     name: 'low',
