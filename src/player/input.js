@@ -1,28 +1,33 @@
-// OWNER: traversal engineer. Keyboard + mouse (pointer lock) + Gamepad API.
+// OWNER: traversal engineer. Keyboard + mouse (pointer lock) + Gamepad API + touch.
 // Exposes raw state plus high-level "actions" sampled once per frame via poll().
 //
 // Bindings (Insomniac layout):
-//   Keyboard/mouse                          Gamepad (standard mapping)
-//   WASD / arrows   move (camera relative)  LS
-//   Mouse           camera                  RS
-//   RIGHT MOUSE     web-swing (hold)        R2 (in air)
+//   Keyboard/mouse                          Gamepad (standard mapping)          Touch
+//   WASD / arrows   move (camera relative)  LS                                  Left stick
+//   Mouse           camera                  RS                                  Right drag
+//   RIGHT MOUSE     web-swing (hold)        R2 (in air)                         Swing button
 //   Shift           WALK (held, on the ground) / wall run + parkour on walls    R2 = parkour on ground / walls, swing in air
 //                   (user r12: ground sprint was removed in r4; on the pad, walk = light stick tilt)
-//   Space           jump (hold = charge)    A / Cross
-//   E / MIDDLE MOUSE web-zip / point-launch L2 + R2  (or Y / Triangle)
-//   C / Ctrl        drop / dive             B / Circle
+//                   On touch: full stick push ≈ sprint/parkour intent
+//   Space           jump (hold = charge)    A / Cross                           Jump button
+//   E / MIDDLE MOUSE web-zip / point-launch L2 + R2  (or Y / Triangle)           Zip button
+//   C / Ctrl        drop / dive             B / Circle                          Dive button
 //   Q               quick web boost (air)   L1 / LB — one-hand web to a far point ahead + forward boost (not in combat: Q = finisher)
+//                                           Touch: Boost button
 //   Ctrl (held, on the ground) + LMB / RMB  web slingshot: anchor a web to the left / right building (no swing / attack)
 //   T               web tightrope (perched only): web to the highlighted point, then walk it (W / S)   —
 //
 // state: move {x,y} (x = right, y = forward, -1..1), look {dx,dy} (pixels-equivalent),
 //   swing, sprint, walk (Shift only, keyboard), jump, zip, drop, quick, rope (T) (held) + <name>Pressed / <name>Released edge flags, jumpHeld (seconds),
-//   aimT (seconds since the last deliberate camera move), usingPad.
+//   aimT (seconds since the last deliberate camera move), usingPad, usingTouch.
 // Automation: input.press('KeyW' | 'Space' | 'MouseRight' | 'MouseMiddle' ...), input.release(code), input.releaseAll().
+import { createTouchControls } from './touch.js';
+
 export function createInput(el) {
   const keys = new Set(); const tapped = new Set(); // tapped: keys pressed since last poll (latched so short taps are never lost)
   const mouse = { dx: 0, dy: 0, buttons: 0 };
   const synthetic = new Set();
+  const touchCtl = createTouchControls();
   const isTyping = e => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '');
   addEventListener('keydown', e => {
     if (isTyping(e)) return;
@@ -33,7 +38,11 @@ export function createInput(el) {
   });
   addEventListener('keyup', e => keys.delete(e.code));
   addEventListener('blur', () => { keys.clear(); mouse.buttons = 0; });
-  el.addEventListener('click', () => { try { el.requestPointerLock?.(); } catch {} });
+  // Skip pointer-lock request when touch UI is active (mobile has no useful pointer lock)
+  el.addEventListener('click', () => {
+    if (touchCtl.isEnabled()) return;
+    try { el.requestPointerLock?.(); } catch {}
+  });
   addEventListener('mousemove', e => {
     // release-only resync: a mouseup lost outside the window (no pointer lock) must never leave the web stuck on.
     // (DOM MouseEvent.buttons: 1 left, 2 right, 4 middle — our bits are 1 << e.button: 1 left, 2 middle, 4 right)
@@ -60,7 +69,7 @@ export function createInput(el) {
 
   const prev = {};
   const state = {
-    move: { x: 0, y: 0 }, look: { dx: 0, dy: 0 }, usingPad: false,
+    move: { x: 0, y: 0 }, look: { dx: 0, dy: 0 }, usingPad: false, usingTouch: false,
     swing: false, jump: false, zip: false, sprint: false, walk: false, drop: false, quick: false, rope: false, jumpHeld: 0, aimT: 99,
   };
   const dz = v => (Math.abs(v) < 0.15 ? 0 : (v - Math.sign(v) * 0.15) / 0.85);
@@ -101,9 +110,27 @@ export function createInput(el) {
       quick ||= b(4) && !b(5); // L1 alone (L1+R1 = combat throw)
       swing ||= rt && !zipCombo; sprint ||= rt && !zipCombo; jump ||= b(0); zip ||= zipCombo || b(3); drop ||= b(1);
     }
+
+    // ----- touch overlay -----
+    const usingTouch = touchCtl.isEnabled();
+    if (usingTouch) {
+      const t = touchCtl.touch;
+      mx += t.move.x;
+      my += t.move.y;
+      const tl = touchCtl.consumeLook();
+      lx += tl.dx;
+      ly += tl.dy;
+      swing ||= t.swing;
+      jump ||= t.jump;
+      zip ||= t.zip;
+      drop ||= t.drop;
+      quick ||= t.quick;
+      sprint ||= t.sprint;
+    }
+
     tapped.clear();
     const len = Math.hypot(mx, my); if (len > 1) { mx /= len; my /= len; }
-    Object.assign(state, { move: { x: mx, y: my }, look: { dx: lx, dy: ly }, swing, jump, zip, drop, sprint, walk, quick, rope, usingPad, ctrl, slingL, slingR });
+    Object.assign(state, { move: { x: mx, y: my }, look: { dx: lx, dy: ly }, swing, jump, zip, drop, sprint, walk, quick, rope, usingPad, usingTouch, ctrl, slingL, slingR });
     for (const k of ['swing', 'jump', 'zip', 'drop', 'sprint', 'walk', 'quick', 'rope']) {
       state[k + 'Pressed'] = state[k] && !prev[k];
       state[k + 'Released'] = !state[k] && prev[k];
@@ -115,7 +142,7 @@ export function createInput(el) {
   }
 
   return {
-    keys, mouse, state, poll, sling,
+    keys, mouse, state, poll, sling, touch: touchCtl,
     press(code) { synthetic.add(code); }, release(code) { synthetic.delete(code); }, releaseAll() { synthetic.clear(); },
     consumeMouse() { const r = { dx: mouse.dx, dy: mouse.dy }; mouse.dx = mouse.dy = 0; return r; },
   };
